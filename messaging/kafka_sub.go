@@ -34,7 +34,7 @@ func (c *kafkaReader) Listen() {
 	}
 }
 
-func NewKafkaReader(config EventReaderConfig, sub Consumer) EventReader {
+func NewReader(config EventReaderConfig, sub Consumer) EventReader {
 	readerConfig := kafka.ReaderConfig{
 		Brokers:        config.Brokers,
 		GroupID:        config.GroupID,

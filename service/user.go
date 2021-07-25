@@ -3,38 +3,59 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"log"
 
-	"github.com/GordonRamsay-Trendyol/notification-manager/messaging"
-	"github.com/GordonRamsay-Trendyol/notification-manager/model"
-	"github.com/GordonRamsay-Trendyol/notification-manager/util"
-)
-
-const (
-	UserUpdateTopic = "update_user"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/messaging"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/model"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/repository"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/util"
 )
 
 type UserService interface {
+	CreateUser(user *model.User) error
 	UpdateNotificationSettings(userID int64, settings model.NotificationSettings) error
+	UpdatePushID(userID int64, pushID string) error
 }
 
-func NewUserService(config messaging.EventReaderConfig) UserService {
-	service := &userServiceImpl{}
+func NewUserService() UserService {
+	repository := repository.NewUserRepository()
+	service := &userServiceImpl{userRepository: repository}
 
-	reader := messaging.NewKafkaReader(config, service)
-	reader.Listen()
+	reader := messaging.NewReader(newEventReaderConfig(UserUpdateTopic), service)
+	go reader.Listen()
 
 	return service
 }
 
 type userServiceImpl struct {
-	notificationSettingsRepo interface{}
+	userRepository repository.UserRepository
 }
 
 func (service *userServiceImpl) UpdateNotificationSettings(userID int64, settings model.NotificationSettings) error {
+	user, err := service.userRepository.FindById(userID)
+
+	if err != nil {
+		log.Printf("user not found, err: %v\n", err)
+		return errors.New("user not found")
+	}
+
+	user.NotificationSettings = settings
+	service.userRepository.Update(*user)
+
+	return nil
+}
+
+func (service *userServiceImpl) UpdatePushID(userID int64, pushID string) error {
+	return nil
+}
+
+func (service *userServiceImpl) CreateUser(user *model.User) error {
+	service.userRepository.Save(*user)
 	return nil
 }
 
 func (service *userServiceImpl) Receive(msg []byte) error {
+	// TODO: No need to update user changes...
 	userUpdateMsg := userUpdateMsg{}
 
 	if err := json.Unmarshal(msg, &userUpdateMsg); err != nil {

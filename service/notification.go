@@ -2,101 +2,121 @@ package service
 
 import (
 	"encoding/json"
+	"log"
 
-	"github.com/GordonRamsay-Trendyol/notification-manager/messaging"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/messaging"
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/repository"
 )
 
+type NotificationType string
+
 const (
-	SmsTopic   = "sms_notification"
-	EmailTopic = "email_notification"
-	PushTopic  = "push_notification"
+	Email NotificationType = "EMAIL"
+	Push  NotificationType = "PUSH"
+	SMS   NotificationType = "SMS"
 )
 
 type NotificationService interface {
-	SendSMS(phone, message string) error
-	SendEmail(email, message string) error
-	SendPushNotification(pushID, message string) error
+	Receive(msg []byte) error
 }
 
 func NewNotificationService() NotificationService {
-	newConfig := func(topic string) messaging.PublisherConfiguration {
-		return messaging.PublisherConfiguration{
-			BootstrapServer: "localhost:9092",
-			Topic:           topic,
-		}
+	service := &notificationServiceImpl{
+		smsPub:   messaging.NewPublisher(newPublisherConfig(SmsTopic)),
+		emailPub: messaging.NewPublisher(newPublisherConfig(EmailTopic)),
+		pushPub:  messaging.NewPublisher(newPublisherConfig(PushTopic)),
 	}
-	sms := newConfig(SmsTopic)
-	email := newConfig(EmailTopic)
-	push := newConfig(PushTopic)
 
-	return &notificationServiceImpl{
-		smsPub:   messaging.NewKafkaPublisher(sms),
-		emailPub: messaging.NewKafkaPublisher(email),
-		pushPub:  messaging.NewKafkaPublisher(push),
-	}
+	reader := messaging.NewReader(newEventReaderConfig(NotificationTopic), service)
+	go reader.Listen()
+
+	return service
 }
 
 type notificationServiceImpl struct {
+	userRepository repository.UserRepository
+
 	smsPub   messaging.Publisher
 	emailPub messaging.Publisher
 	pushPub  messaging.Publisher
 }
 
-func (publisher *notificationServiceImpl) SendSMS(phoneNumber, message string) error {
-	sms := newSMS(phoneNumber, message)
+type smsMsg struct {
+	PhoneNumber string `json:"phoneNumber"`
+	Message     string `json:"message"`
+}
+
+type emailMsg struct {
+	EmailAddress string `json:"emailAddress"`
+	Subject      string `json:"subject"`
+	Content      string `json:"content"`
+}
+
+type pushMsg struct {
+	PushID  string `json:"pushId"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+type notificationMsg struct {
+	To               int64  `json:"to"`
+	Title            string `json:"title"`
+	Content          string `json:"content"`
+	NotificationType string `json:"type"`
+}
+
+func (publisher *notificationServiceImpl) sendSMS(phoneNumber, message string) error {
+	sms := smsMsg{
+		PhoneNumber: phoneNumber,
+		Message:     message,
+	}
 	bytes, _ := json.Marshal(sms)
+	log.Printf("Sms prepared, sms: %v\n", sms)
 	return publisher.smsPub.Publish(bytes)
 }
 
-func (publisher *notificationServiceImpl) SendEmail(emailAddress, message string) error {
-	email := newEmail(emailAddress, message)
+func (publisher *notificationServiceImpl) sendEmail(emailAddress, subject, content string) error {
+	email := emailMsg{
+		EmailAddress: emailAddress,
+		Subject:      subject,
+		Content:      content,
+	}
 	bytes, _ := json.Marshal(email)
+	log.Printf("Email prepared, email: %v\n", email)
 	return publisher.emailPub.Publish(bytes)
 }
 
-func (publisher *notificationServiceImpl) SendPushNotification(pushID, message string) error {
-	pushMsg := newPushMsg(pushID, message)
-	bytes, _ := json.Marshal(pushMsg)
+func (publisher *notificationServiceImpl) sendPushNotification(pushID, title, content string) error {
+	msg := pushMsg{
+		PushID:  pushID,
+		Title:   title,
+		Content: content,
+	}
+	bytes, _ := json.Marshal(msg)
+	log.Printf("Push notification prepared, msg: %v\n", msg)
 	return publisher.pushPub.Publish(bytes)
 }
 
-func newSMS(phoneNumber, message string) smsMessage {
-	return smsMessage{
-		phoneNumber: phoneNumber,
-		message:     message,
+func (s *notificationServiceImpl) Receive(msg []byte) error {
+	message := notificationMsg{}
+	if err := json.Unmarshal(msg, &message); err != nil {
+		return err
 	}
-}
 
-func newEmail(emailAddress, message string) emailMessage {
-	return emailMessage{
-		emailAddress: emailAddress,
-		subject:      "CAMPAIGN MESSAGE",
-		content:      message,
+	user, err := s.userRepository.FindById(message.To)
+
+	if err != nil {
+		log.Printf("Error occured, while fetching record from repository, err: %v\n, Failed message: %v\n", err, message)
+		return err
 	}
-}
 
-func newPushMsg(pushID, message string) pushMessage {
-	return pushMessage{
-		pushID:      pushID,
-		title:       "Campaign",
-		description: message,
+	if message.NotificationType == string(Email) && user.AllowEmail {
+		s.sendEmail(user.Email, message.Title, message.Content)
+	} else if message.NotificationType == string(SMS) && user.AllowSMS {
+		s.sendSMS(user.PhoneNumber, message.Content)
+	} else if message.NotificationType == string(Push) && user.AllowPushNotification {
+		s.sendPushNotification(user.PushID, message.Title, message.Content)
 	}
-}
 
-type smsMessage struct {
-	phoneNumber string
-	message     string
-}
-
-type emailMessage struct {
-	emailAddress string
-	subject      string
-	content      string
-}
-
-type pushMessage struct {
-	pushID      string
-	title       string
-	description string
-	// it can be many more...
+	return nil
 }

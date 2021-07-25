@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/GordonRamsay-trendyol/notification-manager-microservice/service"
 	"github.com/gorilla/mux"
 )
 
@@ -19,11 +20,14 @@ type Configuration struct {
 func Start(config Configuration) {
 	log.Println("HTTP Server configurations started..")
 
-	router := mux.NewRouter()
-	router.PathPrefix("/user/notification")
+	userService := service.NewUserService()
+	controller := NewUserController(userService)
 
-	router.HandleFunc("/push-id", updatePushID).Methods(http.MethodPut)
-	router.HandleFunc("/settings", updateNotificationSettings).Methods(http.MethodPut)
+	router := mux.NewRouter()
+
+	router.HandleFunc("/user/notification", controller.CreateUser).Methods(http.MethodPost)
+	router.HandleFunc("/user/notification/push-id", controller.UpdatePushID).Methods(http.MethodPut)
+	router.HandleFunc("/user/notification/settings", controller.UpdateNotificationSettings).Methods(http.MethodPut)
 
 	startServer(config, router)
 }
@@ -40,14 +44,4 @@ func startServer(config Configuration, router *mux.Router) {
 
 	log.Printf("HTTP Server configurations finished.. Server will start at address: %v\n", serverAddress)
 	log.Fatal(server.ListenAndServe())
-}
-
-func updatePushID(w http.ResponseWriter, r *http.Request) {
-	// Get push id from path variables or request parameters
-	pathVariables := mux.Vars(r)
-	log.Println(pathVariables)
-}
-
-func updateNotificationSettings(w http.ResponseWriter, r *http.Request) {
-
 }

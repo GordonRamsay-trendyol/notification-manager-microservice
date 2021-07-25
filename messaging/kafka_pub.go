@@ -6,7 +6,7 @@ import (
 	kafka "github.com/segmentio/kafka-go"
 )
 
-func NewKafkaPublisher(config PublisherConfiguration) Publisher {
+func NewPublisher(config PublisherConfiguration) Publisher {
 	writerConfig := kafka.WriterConfig{
 		Brokers:  []string{config.BootstrapServer},
 		Topic:    config.Topic,
