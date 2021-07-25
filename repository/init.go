@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	hostname   = "localhost"
+	hostname   = "couchbase"
 	username   = "Administrator"
 	password   = "password"
 	bucketName = "users"
